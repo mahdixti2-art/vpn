@@ -1,0 +1,225 @@
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+import { getFirestore, collection, addDoc } from 'firebase/firestore';
+import { Database, Clock, ShieldCheck, Zap, User, ArrowRight, CheckCircle, Send, CreditCard, Copy, Info, Camera, Image as ImageIcon, Loader2 } from 'lucide-react';
+
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'vpn-receipt-store';
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [step, setStep] = useState(1);
+  const [months, setMonths] = useState(1);
+  const [volume, setVolume] = useState(10);
+  const [contact, setContact] = useState('');
+  const [receiptImage, setReceiptImage] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+
+  const BOT_TOKEN = "8302811186:AAEMBp9XhMGiW4WaBNF-F59BeDGa_gHV1To";
+  const CHAT_ID = "8474397291";
+  const CARD_NUMBER = "6219861908913584"; 
+  const CARD_NAME = "ملیحه مختاری";
+
+  const BASE_PRICE = 30000;
+  const PER_GB = 5000;
+  const totalPrice = (months * BASE_PRICE) + (volume * PER_GB);
+
+  useEffect(() => {
+    const initAuth = async () => {
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        await signInWithCustomToken(auth, __initial_auth_token);
+      } else {
+        await signInAnonymously(auth);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setReceiptImage(file);
+      setPreviewUrl(URL.createObjectURL(file));
+    }
+  };
+
+  const copyToClipboard = (text) => {
+    const el = document.createElement('textarea');
+    el.value = text;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+    alert('شماره کارت کپی شد!');
+  };
+
+  const sendToTelegram = async () => {
+    const caption = `<b>🧾 رسید پرداخت جدید دریافت شد</b>\n\n` +
+                    `📅 مدت: ${months} ماه\n` +
+                    `💾 حجم: ${volume} گیگ\n` +
+                    `💵 مبلغ: ${totalPrice.toLocaleString()} تومان\n` +
+                    `👤 مشتری: <code>${contact}</code>\n` +
+                    `🆔 آیدی سیستم: <code>${user?.uid.substring(0, 8)}</code>`;
+
+    const formData = new FormData();
+    formData.append('chat_id', CHAT_ID);
+    formData.append('caption', caption);
+    formData.append('parse_mode', 'HTML');
+    formData.append('photo', receiptImage);
+
+    try {
+      await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+        method: 'POST',
+        body: formData
+      });
+    } catch (e) {
+      console.error("خطا در ارسال به تلگرام:", e);
+    }
+  };
+
+  const handleFinalSubmit = async () => {
+    if (!receiptImage) {
+      alert('لطفاً عکس رسید پرداخت را آپلود کنید');
+      return;
+    }
+    setLoading(true);
+    try {
+      // ذخیره متادیتا در دیتابیس
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), {
+        userId: user.uid,
+        contact, months, volume, totalPrice,
+        hasReceipt: true,
+        createdAt: new Date().toISOString()
+      });
+
+      await sendToTelegram();
+      setIsSuccess(true);
+    } catch (e) {
+      alert('خطا در ارتباط با سرور');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (isSuccess) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6 text-center" dir="rtl">
+        <div className="space-y-6 max-w-sm animate-in">
+          <div className="w-24 h-24 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto border border-emerald-500/40">
+            <CheckCircle size={48} className="text-emerald-500" />
+          </div>
+          <h1 className="text-3xl font-bold">تأیید شد!</h1>
+          <p className="text-slate-400 text-sm leading-relaxed">
+            رسید شما با موفقیت برای مدیریت ارسال شد. پس از بررسی واریزی، مشخصات اتصال در تلگرام برای شما فرستاده می‌شود.
+          </p>
+          <button onClick={() => window.location.reload()} className="w-full bg-slate-800 py-4 rounded-2xl font-bold">بازگشت</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#020617] text-slate-200 p-4 md:p-10 font-sans" dir="rtl">
+      <div className="max-w-xl mx-auto">
+        <div className="text-center mb-10">
+          <h1 className="text-4xl font-black text-white italic">NEXT<span className="text-sky-500 underline decoration-sky-500/30">VPN</span></h1>
+        </div>
+
+        <div className="bg-slate-900/50 border border-slate-800 rounded-[3rem] overflow-hidden backdrop-blur-2xl shadow-2xl">
+          <div className="flex bg-slate-900/80 border-b border-slate-800 text-[10px] font-bold text-slate-500">
+            <div className={`flex-1 py-4 text-center ${step === 1 ? 'text-sky-500 bg-sky-500/5' : ''}`}>۱. انتخاب سرویس</div>
+            <div className={`flex-1 py-4 text-center ${step === 2 ? 'text-sky-500 bg-sky-500/5' : ''}`}>۲. اطلاعات مشتری</div>
+            <div className={`flex-1 py-4 text-center ${step === 3 ? 'text-sky-500 bg-sky-500/5' : ''}`}>۳. پرداخت و رسید</div>
+          </div>
+
+          <div className="p-8 md:p-12">
+            {step === 1 && (
+              <div className="space-y-10 animate-in">
+                <div className="space-y-6">
+                  <div className="flex justify-between items-center"><label className="text-sm font-bold text-slate-400">مدت اعتبار</label><span className="text-xl font-black text-white">{months} ماهه</span></div>
+                  <input type="range" min="1" max="12" value={months} onChange={(e)=>setMonths(e.target.value)} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500" />
+                </div>
+                <div className="space-y-6">
+                  <div className="flex justify-between items-center"><label className="text-sm font-bold text-slate-400">حجم ترافیک</label><span className="text-xl font-black text-white">{volume} گیگ</span></div>
+                  <input type="range" min="5" max="500" step="5" value={volume} onChange={(e)=>setVolume(e.target.value)} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-purple-500" />
+                </div>
+                <div className="bg-slate-950/80 p-6 rounded-[2rem] border border-slate-800 flex justify-between items-center shadow-inner">
+                  <span className="text-slate-500 text-sm">مبلغ نهایی:</span>
+                  <div className="text-left"><span className="text-3xl font-black text-sky-500">{totalPrice.toLocaleString()}</span><span className="text-[10px] text-slate-600 mr-1 italic">Toman</span></div>
+                </div>
+                <button onClick={()=>setStep(2)} className="w-full bg-sky-600 hover:bg-sky-500 py-5 rounded-2xl font-bold flex justify-center items-center gap-2 transition-all shadow-lg shadow-sky-600/20">تایید و ادامه <ArrowRight size={20}/></button>
+              </div>
+            )}
+
+            {step === 2 && (
+              <div className="space-y-8 animate-in">
+                <div className="space-y-4">
+                   <h3 className="text-xl font-bold">اطلاعات اتصال</h3>
+                   <p className="text-slate-500 text-sm">شماره موبایل یا آیدی تلگرام خود را جهت ارسال اکانت وارد کنید.</p>
+                   <div className="relative">
+                      <User className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-600" size={20}/>
+                      <input type="text" value={contact} onChange={(e)=>setContact(e.target.value)} placeholder="@Username / 0912..." className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 pr-12 focus:border-sky-500 outline-none" />
+                   </div>
+                </div>
+                <button onClick={()=>setStep(3)} className="w-full bg-sky-600 py-5 rounded-2xl font-bold shadow-lg shadow-sky-600/20">رفتن به مرحله پرداخت</button>
+                <button onClick={()=>setStep(1)} className="w-full text-slate-600 text-xs">بازگشت و اصلاح پلن</button>
+              </div>
+            )}
+
+            {step === 3 && (
+              <div className="space-y-8 animate-in">
+                <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 text-center space-y-4">
+                   <div className="text-xs text-slate-500 uppercase tracking-widest">شماره کارت جهت واریز</div>
+                   <div className="text-xl font-black text-white tracking-[0.2em]">{CARD_NUMBER}</div>
+                   <div className="text-xs text-slate-400 font-bold">{CARD_NAME}</div>
+                   <button onClick={()=>copyToClipboard(CARD_NUMBER)} className="flex items-center gap-1 mx-auto text-sky-500 text-[10px] hover:underline"><Copy size={12}/> کپی شماره کارت</button>
+                </div>
+
+                <div className="space-y-4">
+                  <h3 className="text-lg font-bold flex items-center gap-2"><Camera size={20} className="text-sky-500" /> آپلود عکس رسید</h3>
+                  <div 
+                    onClick={() => document.getElementById('file-upload').click()}
+                    className="border-2 border-dashed border-slate-800 rounded-3xl p-8 flex flex-col items-center gap-3 cursor-pointer hover:bg-slate-800/20 transition-all overflow-hidden"
+                  >
+                    {previewUrl ? (
+                      <img src={previewUrl} className="w-full h-40 object-cover rounded-xl" alt="Preview" />
+                    ) : (
+                      <>
+                        <ImageIcon size={40} className="text-slate-700" />
+                        <span className="text-xs text-slate-500">برای انتخاب عکس کلیک کنید</span>
+                      </>
+                    )}
+                    <input id="file-upload" type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
+                  </div>
+                </div>
+
+                <div className="p-4 bg-amber-500/5 border border-amber-500/10 rounded-2xl flex gap-3 italic">
+                  <Info size={18} className="text-amber-600 shrink-0" />
+                  <p className="text-[10px] text-slate-500 leading-relaxed">مبلغ واریزی دقیقاً باید <b>{totalPrice.toLocaleString()} تومان</b> باشد. پس از تأیید، اکانت برای شما فعال می‌شود.</p>
+                </div>
+
+                <button 
+                  disabled={loading || !receiptImage}
+                  onClick={handleFinalSubmit}
+                  className={`w-full py-5 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all ${loading || !receiptImage ? 'bg-slate-800' : 'bg-emerald-600 hover:bg-emerald-500 shadow-lg shadow-emerald-900/20'}`}
+                >
+                  {loading ? <Loader2 className="animate-spin" /> : <><Send size={18}/> ثبت نهایی و ارسال رسید</>}
+                </button>
+                <button onClick={()=>setStep(2)} className="w-full text-slate-600 text-xs">بازگشت</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
